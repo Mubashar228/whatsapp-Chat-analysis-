@@ -1,56 +1,29 @@
-import streamlit as st
-import pandas as pd
-import re
-from io import StringIO
+    # Select aggregation level
+    st.subheader("🗓️ Chat Activity Overview")
+    agg_option = st.selectbox("Select Time Interval", ["Daily", "Weekly", "Monthly"])
 
-st.set_page_config(page_title="WhatsApp Chat Analyzer", layout="wide")
-st.title("📱 WhatsApp Chat Analyzer")
+    if agg_option == "Daily":
+        activity_df = df.groupby(df['Timestamp'].dt.date)['Message'].count()
+        st.line_chart(activity_df)
+        st.write("🔝 Top User Per Day")
+        top_per_day = df.groupby([df['Timestamp'].dt.date, 'User']).count()['Message'].reset_index()
+        top_user_day = top_per_day.loc[top_per_day.groupby('Timestamp')['Message'].idxmax()]
+        st.dataframe(top_user_day.rename(columns={'Timestamp': 'Date'}))
 
-# Upload file
-uploaded_file = st.file_uploader("Upload WhatsApp Chat File (.txt)", type="txt")
+    elif agg_option == "Weekly":
+        df['Week'] = df['Timestamp'].dt.to_period('W').apply(lambda r: r.start_time)
+        weekly = df.groupby('Week')['Message'].count()
+        st.bar_chart(weekly)
+        st.write("🔝 Top User Per Week")
+        top_per_week = df.groupby([df['Week'], 'User']).count()['Message'].reset_index()
+        top_user_week = top_per_week.loc[top_per_week.groupby('Week')['Message'].idxmax()]
+        st.dataframe(top_user_week)
 
-if uploaded_file is not None:
-    content = uploaded_file.read().decode("utf-8")
-    chat = content.splitlines()
-
-    # Regex pattern to extract messages
-    pattern = r"^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}) ?(am|pm)? - ([^:]+): (.+)"
-    data = []
-
-    for line in chat:
-        line = line.strip().replace('\u202f', ' ').replace('\xa0', ' ')
-        match = re.match(pattern, line)
-        if match:
-            date = match.group(1)
-            time = match.group(2)
-            ampm = match.group(3)
-            sender = match.group(4)
-            message = match.group(5)
-
-            if ampm:
-                time = f"{time} {ampm}"
-            timestamp = f"{date} {time}"
-            data.append([timestamp, sender, message])
-
-    # Create DataFrame
-    df = pd.DataFrame(data, columns=["Timestamp", "User", "Message"])
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce", dayfirst=True)
-
-    st.success("✅ Chat successfully parsed!")
-    st.write(df.head())
-
-    # Top users
-    st.subheader("👥 Top Users by Message Count")
-    top_users = df['User'].value_counts().head()
-    st.bar_chart(top_users)
-
-    # Daily activity
-    st.subheader("📅 Daily Messages")
-    df['Date'] = df['Timestamp'].dt.date
-    daily_messages = df.groupby('Date').count()['Message']
-    st.line_chart(daily_messages)
-
-    # Hourly activity
-    st.subheader("⏰ Messages by Hour")
-    df['Hour'] = df['Timestamp'].dt.hour
-    st.bar_chart(df['Hour'].value_counts().sort_index())
+    elif agg_option == "Monthly":
+        df['Month'] = df['Timestamp'].dt.to_period('M').astype(str)
+        monthly = df.groupby('Month')['Message'].count()
+        st.bar_chart(monthly)
+        st.write("🔝 Top User Per Month")
+        top_per_month = df.groupby(['Month', 'User']).count()['Message'].reset_index()
+        top_user_month = top_per_month.loc[top_per_month.groupby('Month')['Message'].idxmax()]
+        st.dataframe(top_user_month)
