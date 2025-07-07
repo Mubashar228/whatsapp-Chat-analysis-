@@ -2,22 +2,22 @@ import streamlit as st
 import pandas as pd
 import re
 from io import StringIO
+from datetime import datetime
 
-st.set_page_config(page_title="WhatsApp Chat Analyzer", layout="wide")
-st.title("📱 WhatsApp Chat Analyzer")
+st.set_page_config(page_title="📊 Advanced WhatsApp Chat Analyzer", layout="wide")
+st.title("📱 Advanced WhatsApp Chat Analyzer")
 
-# Upload file
-uploaded_file = st.file_uploader("Upload WhatsApp Chat File (.txt)", type="txt")
+uploaded_file = st.file_uploader("📁 Upload WhatsApp Chat (.txt)", type="txt")
 
 if uploaded_file is not None:
     content = uploaded_file.read().decode("utf-8")
-    chat = content.splitlines()
+    chat_lines = content.splitlines()
 
-    # Regex pattern to extract messages
-    pattern = r"^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}) ?(am|pm)? - ([^:]+): (.+)"
-    data = []
+    # Regex pattern
+    pattern = r"^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}) ?(AM|PM|am|pm)? - ([^:]+): (.+)"
+    messages = []
 
-    for line in chat:
+    for line in chat_lines:
         line = line.strip().replace('\u202f', ' ').replace('\xa0', ' ')
         match = re.match(pattern, line)
         if match:
@@ -26,60 +26,86 @@ if uploaded_file is not None:
             ampm = match.group(3)
             sender = match.group(4)
             message = match.group(5)
-
             if ampm:
                 time = f"{time} {ampm}"
-            timestamp = f"{date} {time}"
-            data.append([timestamp, sender, message])
+            try:
+                timestamp = pd.to_datetime(f"{date} {time}", dayfirst=True)
+                messages.append([timestamp, sender, message])
+            except:
+                continue
 
-    # Create DataFrame
-    df = pd.DataFrame(data, columns=["Timestamp", "User", "Message"])
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce", dayfirst=True)
-    df.dropna(inplace=True)  # Drop rows with invalid timestamps
+    # DataFrame
+    df = pd.DataFrame(messages, columns=["Timestamp", "User", "Message"])
+    df.dropna(inplace=True)
+
+    # Derived columns
+    df['Date'] = df['Timestamp'].dt.date
+    df['Week'] = df['Timestamp'].dt.to_period('W').apply(lambda r: r.start_time)
+    df['Month'] = df['Timestamp'].dt.to_period('M').astype(str)
+    df['Hour'] = df['Timestamp'].dt.hour
 
     st.success("✅ Chat successfully parsed!")
-    st.write(df.head())
 
-    # Top users
-    st.subheader("👥 Top Users by Message Count")
-    top_users = df['User'].value_counts().head()
-    st.bar_chart(top_users)
+    # Global stats
+    st.header("📈 Group Summary")
 
-    # Chat activity overview
-    st.subheader("🗓️ Chat Activity Overview")
-    agg_option = st.selectbox("Select Time Interval", ["Daily", "Weekly", "Monthly"])
+    total_messages = df.shape[0]
+    total_users = df['User'].nunique()
+    media_msgs = df[df['Message'].str.lower().str.contains('<media omitted>')].shape[0]
+    links = df['Message'].str.contains(r'http[s]?://', regex=True).sum()
 
-    if agg_option == "Daily":
-        df['Date'] = df['Timestamp'].dt.date
-        daily_messages = df.groupby('Date')['Message'].count()
-        st.line_chart(daily_messages)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Messages", total_messages)
+    col2.metric("Unique Users", total_users)
+    col3.metric("Media Messages", media_msgs)
+    col4.metric("Links Shared", links)
 
-        st.write("🔝 Top User Per Day")
-        top_per_day = df.groupby(['Date', 'User'])['Message'].count().reset_index()
-        top_user_day = top_per_day.loc[top_per_day.groupby('Date')['Message'].idxmax()]
-        st.dataframe(top_user_day.rename(columns={'Date': 'Date', 'User': 'Top User', 'Message': 'Messages'}))
+    st.divider()
 
-    elif agg_option == "Weekly":
-        df['Week'] = df['Timestamp'].dt.to_period('W').apply(lambda r: r.start_time)
-        weekly_messages = df.groupby('Week')['Message'].count()
-        st.bar_chart(weekly_messages)
+    # Select user for detailed analysis
+    selected_user = st.selectbox("👤 Select a user for analysis", ['All'] + sorted(df['User'].unique()))
 
-        st.write("🔝 Top User Per Week")
-        top_per_week = df.groupby(['Week', 'User'])['Message'].count().reset_index()
-        top_user_week = top_per_week.loc[top_per_week.groupby('Week')['Message'].idxmax()]
-        st.dataframe(top_user_week.rename(columns={'Week': 'Week Start', 'User': 'Top User', 'Message': 'Messages'}))
+    user_df = df if selected_user == 'All' else df[df['User'] == selected_user]
 
-    elif agg_option == "Monthly":
-        df['Month'] = df['Timestamp'].dt.to_period('M').astype(str)
-        monthly_messages = df.groupby('Month')['Message'].count()
-        st.bar_chart(monthly_messages)
+    # Time aggregation
+    st.subheader("🗓️ Activity Over Time")
+    time_interval = st.radio("Select Interval", ["Daily", "Weekly", "Monthly"], horizontal=True)
 
-        st.write("🔝 Top User Per Month")
-        top_per_month = df.groupby(['Month', 'User'])['Message'].count().reset_index()
-        top_user_month = top_per_month.loc[top_per_month.groupby('Month')['Message'].idxmax()]
-        st.dataframe(top_user_month.rename(columns={'Month': 'Month', 'User': 'Top User', 'Message': 'Messages'}))
+    if time_interval == "Daily":
+        msg_count = user_df.groupby('Date')['Message'].count()
+        st.line_chart(msg_count)
 
-    # Hourly analysis
-    st.subheader("⏰ Messages by Hour of Day")
-    df['Hour'] = df['Timestamp'].dt.hour
-    st.bar_chart(df['Hour'].value_counts().sort_index())
+    elif time_interval == "Weekly":
+        msg_count = user_df.groupby('Week')['Message'].count()
+        st.bar_chart(msg_count)
+
+    elif time_interval == "Monthly":
+        msg_count = user_df.groupby('Month')['Message'].count()
+        st.bar_chart(msg_count)
+
+    # Hourly activity
+    st.subheader("⏰ Hourly Activity")
+    hourly = user_df['Hour'].value_counts().sort_index()
+    st.bar_chart(hourly)
+
+    # Word count
+    st.subheader("📝 Word Analysis")
+    user_df['Word Count'] = user_df['Message'].apply(lambda x: len(x.split()))
+    total_words = user_df['Word Count'].sum()
+    avg_words = user_df['Word Count'].mean()
+    st.write(f"🔤 Total Words: `{total_words}` | 📏 Average Words per Message: `{avg_words:.2f}`")
+
+    # Most active users
+    if selected_user == 'All':
+        st.subheader("🏆 Most Active Users")
+        active_users = df['User'].value_counts().head(10)
+        st.bar_chart(active_users)
+
+        st.subheader("📅 Top Users by Each Month")
+        top_month_user = df.groupby(['Month', 'User'])['Message'].count().reset_index()
+        top_month_user = top_month_user.loc[top_month_user.groupby('Month')['Message'].idxmax()]
+        st.dataframe(top_month_user.rename(columns={'User': 'Top User', 'Message': 'Messages'}))
+
+    # Message Table
+    with st.expander("📄 Show Full Chat Table"):
+        st.dataframe(user_df[['Timestamp', 'User', 'Message']].reset_index(drop=True))
